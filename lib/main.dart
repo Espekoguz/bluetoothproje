@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'dart:convert';
+import 'dart:typed_data';
 
 Future<void> requestPermissions() async {
   // Konum izni (Android için gereklidir)
@@ -37,7 +39,7 @@ class _BluetoothConnectPageState extends State<BluetoothConnectPage> {
   BluetoothState _bluetoothState = BluetoothState.UNKNOWN;
   FlutterBluetoothSerial _bluetooth = FlutterBluetoothSerial.instance;
   List<BluetoothDevice> _devicesList = [];
-  BluetoothDevice? _device;
+  late BluetoothDevice _device;
   bool _connected = false;
   List<String> receivedData =
       List.filled(7, ""); // Bluetooth'tan alınan veriler için
@@ -55,13 +57,39 @@ class _BluetoothConnectPageState extends State<BluetoothConnectPage> {
   @override
   void initState() {
     super.initState();
-    requestBluetoothPermissions(); // Uygulama başladığında Bluetooth izinlerini iste
-    requestPermissions();
-    getBluetooth();
+    requestPermissions().then((_) {
+      requestBluetoothPermissions().then((_) {
+        // İzinler verildikten sonra Bluetooth durumunu ve eşleştirilmiş cihazları al
+        getBluetooth();
+      });
+    });
   }
+
 
   getBluetooth() async {
     _bluetoothState = await FlutterBluetoothSerial.instance.state;
+
+    if (_bluetoothState != BluetoothState.STATE_ON) {
+      // Bluetooth kapalıysa, kullanıcıya uyarı göster
+      showDialog(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: Text("Bluetooth Kapalı"),
+            content: Text("Lütfen Bluetooth'u açın."),
+            actions: <Widget>[
+              TextButton(
+                child: Text("Tamam"),
+                onPressed: () {
+                  Navigator.of(context).pop();
+                },
+              ),
+            ],
+          );
+        },
+      );
+      return;
+    }
 
     _bluetooth.onStateChanged().listen((BluetoothState state) {
       setState(() {
@@ -70,6 +98,7 @@ class _BluetoothConnectPageState extends State<BluetoothConnectPage> {
       });
     });
   }
+
 
   getPairedDevices() async {
     List<BluetoothDevice> devices = [];
@@ -91,26 +120,26 @@ class _BluetoothConnectPageState extends State<BluetoothConnectPage> {
 
   void connectToDevice(BluetoothDevice device) async {
     try {
-      await FlutterBluetoothSerial.instance
-          .connect(device)
-          .timeout(Duration(seconds: 10), onTimeout: () {
-        // Bağlantı zaman aşımına uğrarsa
-        print("Bağlantı zaman aşımına uğradı");
-        return;
-      }).then((connection) {
-        print("Bağlandı: ${device.name}");
-        setState(() {
-          _connected = true;
-          _device = device;
-        });
-      });
-    } catch (e) {
-      print("Bağlantı hatası: $e");
-      setState(() {
-        _connected = false;
+      BluetoothConnection connection = await BluetoothConnection.toAddress(device.address);
+      print('Cihaza bağlandı: ${device.name}');
+
+      connection.input?.listen((Uint8List data) {
+        print('Gelen veri: ${ascii.decode(data)}');
+        // Gelen veriyi işleme veya yanıtlama
+
+        if (ascii.decode(data).contains('!')) {
+          connection.finish(); // Bağlantıyı kapat
+          print('Yerel sunucu tarafından bağlantı kesiliyor');
+        }
+      }).onDone(() {
+        print('Uzak istek tarafından bağlantı kesildi');
       });
     }
+    catch (exception) {
+      print('Bağlantı kurulamadı, hata oluştu: $exception');
+    }
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -148,7 +177,6 @@ class _BluetoothConnectPageState extends State<BluetoothConnectPage> {
               });
             },
           ),
-          Text('Durum: ${_connected ? "Açık" : "Kapalı"}'),
           Text('Durum: ${_connected ? "Açık" : "Kapalı"}'),
           Expanded(
             child: ListView.builder(

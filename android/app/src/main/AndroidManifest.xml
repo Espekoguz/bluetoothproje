@@ -1,4 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.BLUETOOTH"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <!-- Android 12 ve üzeri için -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+
     <application
         android:label="bluetoothproje"
         android:name="${applicationName}"
@@ -29,5 +36,8 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Bluetooth İzinleri -->
+
+
     </application>
 </manifest>
