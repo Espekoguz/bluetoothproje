@@ -69,17 +69,26 @@ class _BluetoothConnectPageState extends State<BluetoothConnectPage> {
   getBluetooth() async {
     _bluetoothState = await FlutterBluetoothSerial.instance.state;
 
-    if (_bluetoothState != BluetoothState.STATE_ON) {
-      // Bluetooth kapalıysa, kullanıcıya uyarı göster
+    if (_bluetoothState == BluetoothState.STATE_OFF) {
+      // Bluetooth kapalıysa, kullanıcıya açmasını teklif et
       showDialog(
         context: context,
         builder: (context) {
           return AlertDialog(
             title: Text("Bluetooth Kapalı"),
-            content: Text("Lütfen Bluetooth'u açın."),
+            content: Text("Bluetooth'u açmak ister misiniz?"),
             actions: <Widget>[
               TextButton(
-                child: Text("Tamam"),
+                child: Text("Evet"),
+                onPressed: () async {
+                  // Bluetooth'u aç
+                  await FlutterBluetoothSerial.instance.requestEnable();
+                  Navigator.of(context).pop();
+                  getPairedDevices(); // Bluetooth açıldıktan sonra eşleştirilmiş cihazları al
+                },
+              ),
+              TextButton(
+                child: Text("Hayır"),
                 onPressed: () {
                   Navigator.of(context).pop();
                 },
@@ -88,10 +97,12 @@ class _BluetoothConnectPageState extends State<BluetoothConnectPage> {
           );
         },
       );
-      return;
+    } else {
+      getPairedDevices(); // Bluetooth zaten açıksa, doğrudan eşleştirilmiş cihazları al
     }
 
-    _bluetooth.onStateChanged().listen((BluetoothState state) {
+
+  _bluetooth.onStateChanged().listen((BluetoothState state) {
       setState(() {
         _bluetoothState = state;
         getPairedDevices();
@@ -106,39 +117,98 @@ class _BluetoothConnectPageState extends State<BluetoothConnectPage> {
     try {
       devices = await _bluetooth.getBondedDevices();
     } on Exception {
-      print('Error');
+      print('Eşleştirilmiş cihazları alırken hata oluştu');
     }
 
-    if (!mounted) {
-      return;
-    }
+    if (!mounted) return;
 
     setState(() {
       _devicesList = devices;
     });
+
+    // Eşleştirilmiş cihaz yoksa bir hata mesajı göster
+    if (_devicesList.isEmpty) {
+      showDialog(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: Text("Eşleştirilmiş Cihaz Bulunamadı"),
+            content: Text("Lütfen bir Bluetooth cihazı ile eşleştirin."),
+            actions: <Widget>[
+              TextButton(
+                child: Text("Tamam"),
+                onPressed: () {
+                  Navigator.of(context).pop();
+                },
+              ),
+            ],
+          );
+        },
+      );
+    } else {
+      // Eşleştirilmiş cihazlar varsa, bu noktada istenilen işlemleri yapabilirsiniz
+    }
   }
 
-  void connectToDevice(BluetoothDevice device) async {
+
+  connectToDevice(BluetoothDevice device) async {
     try {
       BluetoothConnection connection = await BluetoothConnection.toAddress(device.address);
       print('Cihaza bağlandı: ${device.name}');
 
-      connection.input?.listen((Uint8List data) {
-        print('Gelen veri: ${ascii.decode(data)}');
-        // Gelen veriyi işleme veya yanıtlama
+      setState(() {
+        _connected = true;
+        _device = device;
+      });
 
-        if (ascii.decode(data).contains('!')) {
+      // Bağlantı başarılı olduktan sonra '1' komutunu gönder
+      connection.output.add(utf8.encode("1"));
+      await connection.output.allSent;
+
+      int dataIndex = 0; // Gelen verinin indeksi
+
+      connection.input?.listen((Uint8List data) {
+        String receivedString = ascii.decode(data);
+        print('Gelen veri: $receivedString');
+
+        List<String> splittedData = receivedString.split('\n');
+        for (var dataPiece in splittedData) {
+          if (dataPiece.isNotEmpty) {
+            setState(() {
+              // Gelen veriyi uygun indekse ekle
+              receivedData[dataIndex] = dataPiece;
+              dataIndex++;
+
+              // Eğer 7 veri alındıysa, indeksi sıfırla
+              if (dataIndex >= 7) {
+                dataIndex = 0;
+              }
+            });
+          }
+        }
+
+        if (receivedString.contains('!')) {
           connection.finish(); // Bağlantıyı kapat
           print('Yerel sunucu tarafından bağlantı kesiliyor');
+          setState(() {
+            _connected = false;
+          });
         }
       }).onDone(() {
         print('Uzak istek tarafından bağlantı kesildi');
+        setState(() {
+          _connected = false;
+        });
+      });
+    } catch (exception) {
+      print('Bağlantı kurulamadı, hata oluştu: $exception');
+      setState(() {
+        _connected = false;
       });
     }
-    catch (exception) {
-      print('Bağlantı kurulamadı, hata oluştu: $exception');
-    }
   }
+
+
 
 
   @override
@@ -180,7 +250,7 @@ class _BluetoothConnectPageState extends State<BluetoothConnectPage> {
           Text('Durum: ${_connected ? "Açık" : "Kapalı"}'),
           Expanded(
             child: ListView.builder(
-              itemCount: dataNames.length,
+              itemCount: receivedData.length,
               itemBuilder: (context, index) {
                 return ListTile(
                   title: Text(dataNames[index]),
